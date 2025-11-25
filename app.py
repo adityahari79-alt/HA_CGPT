@@ -1,10 +1,10 @@
 # app.py
 import logging
-from datetime import time as time_cls
+from datetime import datetime, time as time_cls
 from typing import Optional
 
-import pandas as pd
 import altair as alt
+import pandas as pd
 import streamlit as st
 
 from config import load_config
@@ -76,7 +76,24 @@ trailing_stop_pct = st.sidebar.number_input(
     "Trailing Stop (%)", value=1.0, min_value=0.1, step=0.1
 )
 
-st.sidebar.markdown("### Trading Session")
+st.sidebar.markdown("### Timezone & Trading Session")
+
+# Show server time + tz
+server_now = datetime.now().astimezone()
+st.sidebar.caption(
+    f"Server time: {server_now.strftime('%Y-%m-%d %H:%M:%S')} ({server_now.tzinfo})"
+)
+
+timezone_name = st.sidebar.text_input(
+    "Strategy Timezone",
+    value="Asia/Kolkata",
+    help="IANA timezone name, e.g., Asia/Kolkata, Europe/London, America/New_York.",
+)
+
+respect_trading_hours = st.sidebar.checkbox(
+    "Respect trading hours window", value=True
+)
+
 session_start = st.sidebar.time_input("Session Start", value=time_cls(9, 15))
 session_end = st.sidebar.time_input("Session End", value=time_cls(15, 15))
 
@@ -115,6 +132,8 @@ else:
             event_log=st.session_state.event_log,
             session_start=session_start,
             session_end=session_end,
+            respect_trading_hours=respect_trading_hours,
+            timezone_name=timezone_name,
         )
         st.session_state.last_candle_ts = last_ts
         st.session_state.position = position
@@ -154,10 +173,8 @@ with right_col:
         candles, ha = heikin_ashi_snapshot(config, limit=100)
         if ha:
             df_ha = pd.DataFrame(ha)
-            # Ensure timestamp is datetime for charting
             df_ha["timestamp"] = pd.to_datetime(df_ha["timestamp"])
 
-            # Build a candlestick-style chart for Heikin-Ashi
             base = alt.Chart(df_ha).encode(x="timestamp:T")
 
             rule = base.mark_rule().encode(
