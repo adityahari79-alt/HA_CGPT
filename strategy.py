@@ -3,6 +3,8 @@ import logging
 from datetime import datetime, time as time_cls
 from typing import Any, Dict, List, Optional, Tuple
 
+import pytz
+
 from config import Config
 from conditions import ConditionEngine, HeikinAshiDojiReversalCondition
 from heikin_ashi import compute_heikin_ashi
@@ -13,6 +15,21 @@ from upstox_wrappers import UpstoxRestOHLCClient, UpstoxTradingClient
 log = logging.getLogger(__name__)
 
 
+def _get_now_time(timezone_name: Optional[str]) -> time_cls:
+    """
+    Returns current local time in the given timezone.
+    If timezone is invalid or None, falls back to server local time.
+    """
+    try:
+        if timezone_name:
+            tz = pytz.timezone(timezone_name)
+            return datetime.now(tz).time()
+    except Exception:
+        # Fallback to server local time
+        pass
+    return datetime.now().astimezone().time()
+
+
 def strategy_step(
     config: Config,
     last_candle_ts: Optional[str],
@@ -20,10 +37,12 @@ def strategy_step(
     event_log: Optional[List[str]] = None,
     session_start: Optional[time_cls] = None,
     session_end: Optional[time_cls] = None,
+    respect_trading_hours: bool = True,
+    timezone_name: Optional[str] = "Asia/Kolkata",
 ) -> Tuple[Optional[str], Optional[Position]]:
     """
     One iteration of the strategy:
-    - (optional) respect trading session time window
+    - optionally respect trading session time window (with timezone)
     - fetch intraday candles
     - compute Heikin Ashi
     - detect Doji reversal (long/short)
@@ -35,12 +54,13 @@ def strategy_step(
         event_log = []
 
     # Trading session filter
-    if session_start and session_end:
-        now_time = datetime.now().time()
+    if respect_trading_hours and session_start and session_end and session_start < session_end:
+        now_time = _get_now_time(timezone_name)
         if not (session_start <= now_time <= session_end):
             event_log.append(
                 f"Outside trading window ({session_start.strftime('%H:%M')}–"
-                f"{session_end.strftime('%H:%M')}), skipping trading step."
+                f"{session_end.strftime('%H:%M')}) in {timezone_name or 'server timezone'}, "
+                f"current time: {now_time.strftime('%H:%M:%S')}. Skipping trading step."
             )
             return last_candle_ts, position
 
